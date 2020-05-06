@@ -1,0 +1,158 @@
+---
+title: "PCA analysis"
+author: "xz2872"
+date: "12/18/2019"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+```{r}
+library(data.table)
+library(mltools)
+library(dplyr)
+library(corrplot)
+library(pracma)
+library(randomForest)
+library(ROSE)
+library(factoextra)
+library(FactoMineR)
+library(ggbiplot)
+```
+```{r}
+install.packages('devtools')
+library(devtools)
+install_github("vqv/ggbiplot")
+```
+
+```{r}
+#set your working directory
+setwd("~/Desktop/stat/final")
+os <- read.csv(file = "online_shoppers_intention.csv")
+```
+
+```{r}
+num_duplicated <- nrow(os[duplicated(os),])
+os <- os[!duplicated(os),]
+os <- os %>% 
+  mutate(Revenue = as.integer(Revenue),
+         Weekend = as.integer(Weekend),
+         Month = as.integer(Month),
+         VisitorType = as.integer(VisitorType)
+  )
+```
+
+```{r}
+co_matrix <- cor(os)
+corrplot(co_matrix, type = "upper", order = "hclust", 
+         tl.cex = 0.5, tl.col = "black", tl.srt = 45)
+```
+
+```{r}
+#use random forest to 
+set.seed(10)
+train=sample(1:nrow(os),ceil(0.7*nrow(os)))
+train_data = os[train,]
+test=-train
+test_data = os[test,]
+N_1 = 2*length( which(train_data$Revenue == 0))
+os_over <- ovun.sample(Revenue~.,data = train_data, method= 'over', N = N_1, seed = 1)$data
+n<-length(names(os_over)) 
+m = ceil(log2(n))
+rf_train<-randomForest(as.factor(os_over$Revenue)~.,data=os_over,mtry=m ,ntree=100,importance=TRUE,proximity=TRUE)
+pred<-predict(rf_train,newdata=test_data)
+varImpPlot(rf_train, sort = TRUE, n.var = 17, main = 'Features Importance by RF')
+```
+
+```{r}
+y_train <- train_data[,18] 
+X_train <- train_data[,1:17]
+y_test <- test_data[,18] 
+X_test = test_data[,1:17]
+df.pca <- PCA(X_train, scale.unit = TRUE)
+```
+
+```{r}
+fviz_eig(df.pca, addlabels=TRUE, hjust = 0, barfill = "#4189b3", ncp=17) + ylim(0, 22)
+```
+
+```{r}
+fviz_pca_var(df.pca,labelsize = 3, 
+             col.var = "coord",
+             gradient.cols = c("#56B4E9", "#fec306", "#df5227"),
+             repel = TRUE
+)
+```
+
+```{r}
+ggbiplot(df.pca)
+```
+
+```{r}
+#11 PCs count for 85% variance explained,extract them as new features
+pca_obj <- prcomp(train_data[, 1:17], center = TRUE, scale. = TRUE, rank.=11)
+summary(pca_obj)
+train_x <-pca_obj$x
+test_x <- predict(pca_obj, newdata=test_data[,1:17])
+```
+
+```{r}
+df_train <- cbind(train_x, y_train)
+df_train = as.data.frame(df_train)
+rf_train<-randomForest(as.factor(df_train$y_train)~.,data=df_train, mtry=m ,ntree=100,importance=TRUE,proximity=TRUE)
+test = cbind(test_x, y_test)
+test = as.data.frame(test)
+pred<-predict(rf_train,newdata=test) 
+table(pred, test$y_test)
+```
+
+```{r}
+tab <- table(pred, test$y_test)
+sum_tab = colSums(tab)[1] + colSums(tab)[2] 
+Accuracy = sum(diag(tab))/sum_tab
+TPR= table(pred, test_data$Revenue)[1]/colSums(table(pred, test_data$Revenue))[1]
+TNR = table(pred, test_data$Revenue)[4]/colSums(table(pred, test_data$Revenue))[2]
+PPV = table(pred, test_data$Revenue)[1]/rowSums(table(pred, test_data$Revenue))[1]
+F1_neg = 2*PPV*TPR/(PPV+TPR)
+
+TPR = table(pred, test_data$Revenue)[4]/colSums(table(pred, test_data$Revenue))[2]
+TNR = table(pred, test_data$Revenue)[1]/colSums(table(pred, test_data$Revenue))[1]
+PPV = table(pred, test_data$Revenue)[4]/rowSums(table(pred, test_data$Revenue))[2]
+F1_pos = 2*PPV*TPR/(PPV+TPR)
+
+F1 = (F1_pos + F1_neg)/2
+Accuracy_pca = Accuracy
+TPR_pca = TPR
+TNR_pca = TNR
+F1_pca = F1
+```
+
+```{r}
+# metric after using extracted PCs as new features
+Accuracy_pca 
+TPR_pca 
+TNR_pca 
+F1_pca 
+```
+
